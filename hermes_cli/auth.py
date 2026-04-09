@@ -310,6 +310,13 @@ PROVIDER_REGISTRY: Dict[str, ProviderConfig] = {
         api_key_env_vars=("ANTHROPIC_API_KEY", "ANTHROPIC_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"),
         base_url_env_var="ANTHROPIC_BASE_URL",
     ),
+    "vertex": ProviderConfig(
+        id="vertex",
+        name="Google Vertex AI (Claude)",
+        auth_type="gcloud_adc",
+        inference_base_url="",
+        api_key_env_vars=("ANTHROPIC_VERTEX_PROJECT_ID",),
+    ),
     "alibaba": ProviderConfig(
         id="alibaba",
         name="Qwen Cloud",
@@ -1528,6 +1535,7 @@ def resolve_provider(
         "go": "opencode-go", "opencode-go-sub": "opencode-go",
         "kilo": "kilocode", "kilo-code": "kilocode", "kilo-gateway": "kilocode",
         "lmstudio": "lmstudio", "lm-studio": "lmstudio", "lm_studio": "lmstudio",
+        "vertex-ai": "vertex", "vertex_ai": "vertex", "google-vertex": "vertex",
         # Local server aliases — route through the generic custom provider
         "ollama": "custom", "ollama_cloud": "ollama-cloud",
         "vllm": "custom", "llamacpp": "custom",
@@ -1576,6 +1584,12 @@ def resolve_provider(
                 return active
     except Exception as e:
         logger.debug("Could not detect active auth provider: %s", e)
+
+    # Auto-detect Vertex AI via CLAUDE_CODE_USE_VERTEX env var
+    if os.getenv("CLAUDE_CODE_USE_VERTEX", "").strip() == "1":
+        project_id = os.getenv("ANTHROPIC_VERTEX_PROJECT_ID", "").strip()
+        if project_id:
+            return "vertex"
 
     if has_usable_secret(os.getenv("OPENAI_API_KEY")) or has_usable_secret(os.getenv("OPENROUTER_API_KEY")):
         return "openrouter"

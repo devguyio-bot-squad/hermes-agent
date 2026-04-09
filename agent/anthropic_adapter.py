@@ -856,6 +856,39 @@ def build_anthropic_bedrock_client(region: str):
     )
 
 
+def build_vertex_client(project_id: str, region: str = "us-east5"):
+    """Create an AnthropicVertex client for Google Vertex AI.
+
+    Uses Google Cloud Application Default Credentials (ADC) for auth.
+    No API key needed — authenticate via ``gcloud auth application-default login``
+    or a service account key.
+
+    Returns an anthropic.AnthropicVertex instance (same .messages interface).
+    """
+    _anthropic_sdk = _get_anthropic_sdk()
+    if _anthropic_sdk is None:
+        raise ImportError(
+            "The 'anthropic' package is required for the Vertex AI provider. "
+            "Install it with: pip install 'anthropic[vertex]'"
+        )
+    if not hasattr(_anthropic_sdk, "AnthropicVertex"):
+        raise ImportError(
+            "Vertex AI support requires the 'anthropic[vertex]' extra. "
+            "Install it with: pip install 'anthropic[vertex]'"
+        )
+    from httpx import Timeout
+
+    kwargs = {
+        "project_id": project_id,
+        "region": region,
+        "timeout": Timeout(timeout=900.0, connect=10.0),
+    }
+    if _COMMON_BETAS:
+        kwargs["default_headers"] = {"anthropic-beta": ",".join(_COMMON_BETAS)}
+
+    return _anthropic_sdk.AnthropicVertex(**kwargs)
+
+
 def _read_claude_code_credentials_from_keychain() -> Optional[Dict[str, Any]]:
     """Read Claude Code OAuth credentials from the macOS Keychain.
 

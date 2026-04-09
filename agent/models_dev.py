@@ -145,6 +145,7 @@ PROVIDER_TO_MODELS_DEV: Dict[str, str] = {
     "anthropic": "anthropic",
     "openai": "openai",
     "openai-codex": "openai",
+    "vertex": "anthropic",  # Vertex AI serves Anthropic's models
     "zai": "zai",
     "kimi": "kimi-for-coding",
     "kimi-coding": "kimi-for-coding",

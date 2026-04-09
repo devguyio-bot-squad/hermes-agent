@@ -1791,6 +1791,8 @@ def _resolve_runtime_agent_kwargs() -> dict:
         "args": list(runtime.get("args") or []),
         "credential_pool": runtime.get("credential_pool"),
         "max_tokens": max_tokens,
+        "project_id": runtime.get("project_id"),
+        "region": runtime.get("region"),
     }
 
 

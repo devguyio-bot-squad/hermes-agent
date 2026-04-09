@@ -235,6 +235,8 @@ def init_agent(
     checkpoint_max_total_size_mb: int = 500,
     checkpoint_max_file_size_mb: int = 10,
     pass_session_id: bool = False,
+    project_id: str = None,
+    region: str = None,
 ):
     """
     Initialize the AI Agent.
@@ -341,6 +343,8 @@ def init_agent(
     elif (provider_name is None) and agent._base_url_hostname == "api.x.ai":
         agent.api_mode = "codex_responses"
         agent.provider = "xai"
+    elif agent.provider == "vertex":
+        agent.api_mode = "anthropic_messages"
     elif agent.provider == "anthropic" or (provider_name is None and agent._base_url_hostname == "api.anthropic.com"):
         agent.api_mode = "anthropic_messages"
         agent.provider = "anthropic"
@@ -633,6 +637,8 @@ def init_agent(
     # access for Codex Responses API streaming.
     agent._anthropic_client = None
     agent._is_anthropic_oauth = False
+    agent._vertex_project_id = ""
+    agent._vertex_region = ""
 
     # Resolve per-provider / per-model request timeout once up front so
     # every client construction path below (Anthropic native, OpenAI-wire,
@@ -659,6 +665,20 @@ def init_agent(
             agent._client_kwargs = {}
             if not agent.quiet_mode:
                 print(f"🤖 AI Agent initialized with model: {agent.model} (AWS Bedrock + AnthropicBedrock SDK, {_br_region})")
+        elif agent.provider == "vertex":
+            from agent.anthropic_adapter import build_vertex_client
+            agent._vertex_project_id = project_id or os.getenv("ANTHROPIC_VERTEX_PROJECT_ID", "")
+            agent._vertex_region = region or os.getenv("CLOUD_ML_REGION", "us-east5")
+            agent.api_key = ""
+            agent._anthropic_api_key = ""
+            agent._anthropic_base_url = ""
+            agent._is_anthropic_oauth = False
+            agent._anthropic_client = build_vertex_client(agent._vertex_project_id, agent._vertex_region)
+            agent.client = None
+            agent._client_kwargs = {}
+            if not agent.quiet_mode:
+                print(f"🤖 AI Agent initialized with model: {agent.model} (Vertex AI)")
+                print(f"📍 Project: {agent._vertex_project_id}, Region: {agent._vertex_region}")
         else:
             # Only fall back to ANTHROPIC_TOKEN when the provider is actually Anthropic.
             # Other anthropic_messages providers (MiniMax, Alibaba, etc.) must use their own API key.

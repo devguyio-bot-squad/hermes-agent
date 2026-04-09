@@ -426,6 +426,8 @@ class AIAgent:
         checkpoint_max_total_size_mb: int = 500,
         checkpoint_max_file_size_mb: int = 10,
         pass_session_id: bool = False,
+        project_id: str = None,
+        region: str = None,
     ):
         """Forwarder — see ``agent.agent_init.init_agent``."""
         from agent.agent_init import init_agent
@@ -501,6 +503,8 @@ class AIAgent:
             checkpoint_max_total_size_mb=checkpoint_max_total_size_mb,
             checkpoint_max_file_size_mb=checkpoint_max_file_size_mb,
             pass_session_id=pass_session_id,
+            project_id=project_id,
+            region=region,
         )
 
     def _get_session_db_for_recall(self):
@@ -3956,6 +3960,7 @@ class AIAgent:
         except Exception:
             pass
 
+        self._anthropic_api_key = new_token
         try:
             self._anthropic_client = build_anthropic_client(
                 new_token,
@@ -4051,11 +4056,14 @@ class AIAgent:
             self._client_kwargs["default_headers"] = merged
 
     def _swap_credential(self, entry) -> None:
+        if self.provider == "vertex":
+            return  # Vertex uses Google ADC — no credential pooling
+
         runtime_key = getattr(entry, "runtime_api_key", None) or getattr(entry, "access_token", "")
         runtime_base = getattr(entry, "runtime_base_url", None) or getattr(entry, "base_url", None) or self.base_url
 
         if self.api_mode == "anthropic_messages":
-            from agent.anthropic_adapter import build_anthropic_client, _is_oauth_token
+            from agent.anthropic_adapter import _is_oauth_token
 
             try:
                 self._anthropic_client.close()
@@ -4106,6 +4114,15 @@ class AIAgent:
             return False
         return pool.has_available()
 
+    def _build_anthropic_client_for_provider(self):
+        """Build the correct Anthropic client based on the current provider."""
+        if self.provider == "vertex":
+            from agent.anthropic_adapter import build_vertex_client
+            return build_vertex_client(self._vertex_project_id, self._vertex_region)
+        else:
+            from agent.anthropic_adapter import build_anthropic_client
+            return build_anthropic_client(self._anthropic_api_key, self._anthropic_base_url)
+
     def _anthropic_messages_create(self, api_kwargs: dict):
         if self.api_mode == "anthropic_messages":
             self._try_refresh_anthropic_client_credentials()
@@ -4137,6 +4154,9 @@ class AIAgent:
             from agent.anthropic_adapter import build_anthropic_bedrock_client
             region = getattr(self, "_bedrock_region", "us-east-1") or "us-east-1"
             self._anthropic_client = build_anthropic_bedrock_client(region)
+        elif getattr(self, "provider", None) == "vertex":
+            from agent.anthropic_adapter import build_vertex_client
+            self._anthropic_client = build_vertex_client(self._vertex_project_id, self._vertex_region)
         else:
             from agent.anthropic_adapter import build_anthropic_client
             self._anthropic_client = build_anthropic_client(

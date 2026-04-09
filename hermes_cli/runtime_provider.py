@@ -338,6 +338,11 @@ def _resolve_runtime_from_pool_entry(
         api_mode = "anthropic_messages"
         pconfig = PROVIDER_REGISTRY.get(provider)
         base_url = base_url or (pconfig.inference_base_url if pconfig else "")
+    elif provider == "vertex":
+        # Vertex AI uses Google ADC — no API key pooling applies.
+        api_mode = "anthropic_messages"
+        base_url = ""
+        api_key = ""
     elif provider == "anthropic":
         api_mode = "anthropic_messages"
         cfg_provider = str(model_cfg.get("provider") or "").strip().lower()
@@ -1242,6 +1247,25 @@ def _resolve_explicit_runtime(
     if not explicit_api_key and not explicit_base_url:
         return None
 
+    if provider == "vertex":
+        project_id = os.getenv("ANTHROPIC_VERTEX_PROJECT_ID", "").strip()
+        region = os.getenv("CLOUD_ML_REGION", "us-east5").strip()
+        if not project_id:
+            raise AuthError(
+                "Vertex AI requires ANTHROPIC_VERTEX_PROJECT_ID. "
+                "Set it via environment variable or in ~/.hermes/.env."
+            )
+        return {
+            "provider": "vertex",
+            "api_mode": "anthropic_messages",
+            "base_url": "",
+            "api_key": "",
+            "project_id": project_id,
+            "region": region,
+            "source": "gcloud_adc",
+            "requested_provider": requested_provider,
+        }
+
     if provider == "anthropic":
         cfg_provider = str(model_cfg.get("provider") or "").strip().lower()
         cfg_base_url = ""
@@ -1460,7 +1484,7 @@ def resolve_runtime_provider(
     if explicit_runtime:
         return explicit_runtime
 
-    should_use_pool = provider != "openrouter"
+    should_use_pool = provider not in ("openrouter", "vertex")
     if provider == "openrouter":
         cfg_provider = str(model_cfg.get("provider") or "").strip().lower()
         cfg_base_url = str(model_cfg.get("base_url") or "").strip()
@@ -1638,6 +1662,26 @@ def resolve_runtime_provider(
             "command": creds.get("command", ""),
             "args": list(creds.get("args") or []),
             "source": creds.get("source", "process"),
+            "requested_provider": requested_provider,
+        }
+
+    # Google Vertex AI (Claude via Anthropic Messages API)
+    if provider == "vertex":
+        project_id = os.getenv("ANTHROPIC_VERTEX_PROJECT_ID", "").strip()
+        region = os.getenv("CLOUD_ML_REGION", "us-east5").strip()
+        if not project_id:
+            raise AuthError(
+                "Vertex AI requires ANTHROPIC_VERTEX_PROJECT_ID. "
+                "Set it via environment variable or in ~/.hermes/.env."
+            )
+        return {
+            "provider": "vertex",
+            "api_mode": "anthropic_messages",
+            "base_url": "",
+            "api_key": "",
+            "project_id": project_id,
+            "region": region,
+            "source": "gcloud_adc",
             "requested_provider": requested_provider,
         }
 

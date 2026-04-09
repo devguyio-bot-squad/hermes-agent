@@ -193,6 +193,8 @@ _PROVIDER_ALIASES = {
     "tokenhub": "tencent-tokenhub",
     "tencent-cloud": "tencent-tokenhub",
     "tencentmaas": "tencent-tokenhub",
+    "vertex-ai": "vertex",
+    "google-vertex": "vertex",
 }
 
 
@@ -343,6 +345,7 @@ _API_KEY_PROVIDER_AUX_MODELS_FALLBACK: Dict[str, str] = {
     "kimi-coding-cn": "kimi-k2-turbo-preview",
     "gmi": "google/gemini-3.1-flash-lite-preview",
     "anthropic": "claude-haiku-4-5-20251001",
+    "vertex": "claude-haiku-4-5-20251001",
     "opencode-zen": "gemini-3-flash",
     "opencode-go": "glm-5",
     "kilocode": "google/gemini-3-flash-preview",
@@ -1537,6 +1540,11 @@ def _resolve_api_key_provider() -> Tuple[Optional[OpenAI], Optional[str]]:
         return None, None
 
     for provider_id, pconfig in PROVIDER_REGISTRY.items():
+        if pconfig.auth_type == "gcloud_adc" and provider_id == "vertex":
+            result = _try_vertex()
+            if result[0] is not None:
+                return result
+            continue
         if pconfig.auth_type != "api_key":
             continue
         if _is_provider_unhealthy(provider_id):
@@ -2284,6 +2292,67 @@ def _try_anthropic(explicit_api_key: str = None) -> Tuple[Optional[Any], Optiona
         # when _anthropic_sdk is None.  Treat as unavailable.
         return None, None
     return AnthropicAuxiliaryClient(real_client, model, token, base_url, is_oauth=is_oauth), model
+
+
+def _try_vertex() -> Tuple[Optional[Any], Optional[str]]:
+    """Try to build a Vertex AI auxiliary client using Google ADC."""
+    try:
+        from agent.anthropic_adapter import build_vertex_client
+    except ImportError:
+        return None, None
+
+    project_id = os.getenv("ANTHROPIC_VERTEX_PROJECT_ID", "").strip()
+    region = os.getenv("CLOUD_ML_REGION", "us-east5").strip()
+    if not project_id:
+        return None, None
+
+    model = _API_KEY_PROVIDER_AUX_MODELS.get("vertex", "claude-haiku-4-5-20251001")
+    logger.debug("Auxiliary client: Vertex AI (%s) project=%s region=%s", model, project_id, region)
+    try:
+        real_client = build_vertex_client(project_id, region)
+    except (ImportError, Exception):
+        return None, None
+    return AnthropicAuxiliaryClient(real_client, model, "", "", is_oauth=False), model
+
+
+def _resolve_forced_provider(forced: str) -> Tuple[Optional[OpenAI], Optional[str]]:
+    """Resolve a specific forced provider.  Returns (None, None) if creds missing."""
+    if forced == "openrouter":
+        client, model = _try_openrouter()
+        if client is None:
+            logger.warning("auxiliary.provider=openrouter but OPENROUTER_API_KEY not set")
+        return client, model
+
+    if forced == "nous":
+        client, model = _try_nous()
+        if client is None:
+            logger.warning("auxiliary.provider=nous but Nous Portal not configured (run: hermes auth)")
+        return client, model
+
+    if forced == "codex":
+        client, model = _try_codex()
+        if client is None:
+            logger.warning("auxiliary.provider=codex but no Codex OAuth token found (run: hermes model)")
+        return client, model
+
+    if forced == "vertex":
+        client, model = _try_vertex()
+        if client is None:
+            logger.warning("auxiliary.provider=vertex but ANTHROPIC_VERTEX_PROJECT_ID not set")
+        return client, model
+
+    if forced == "main":
+        # "main" = skip OpenRouter/Nous, use the main chat model's credentials.
+        for try_fn in (_try_custom_endpoint, _try_codex, _resolve_api_key_provider):
+            client, model = try_fn()
+            if client is not None:
+                return client, model
+        logger.warning("auxiliary.provider=main but no main endpoint credentials found")
+        return None, None
+
+    # Unknown provider name — fall through to auto
+    logger.warning("Unknown auxiliary.provider=%r, falling back to auto", forced)
+    return None, None
 
 
 _AUTO_PROVIDER_LABELS = {
@@ -4005,6 +4074,15 @@ def resolve_provider_client(
         logger.warning("resolve_provider_client: unknown provider %r", provider)
         return None, None
 
+    if pconfig.auth_type == "gcloud_adc":
+        if provider == "vertex":
+            client, default_model = _try_vertex()
+            if client is None:
+                logger.warning("resolve_provider_client: vertex requested but ANTHROPIC_VERTEX_PROJECT_ID not set")
+                return None, None
+            final_model = model or default_model
+            return (_to_async_client(client, final_model) if async_mode else (client, final_model))
+
     if pconfig.auth_type == "api_key":
         if provider == "anthropic":
             client, default_model = _try_anthropic(explicit_api_key=explicit_api_key)
@@ -4304,6 +4382,8 @@ def _resolve_strict_vision_backend(
         return resolve_provider_client("openai-codex", model, is_vision=True)
     if provider == "anthropic":
         return _try_anthropic()
+    if provider == "vertex":
+        return _try_vertex()
     if provider == "custom":
         return _try_custom_endpoint()
     return None, None
