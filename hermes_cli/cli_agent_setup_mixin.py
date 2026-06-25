@@ -82,13 +82,17 @@ class CLIAgentSetupMixin:
         resolved_acp_command = runtime.get("command")
         resolved_acp_args = list(runtime.get("args") or [])
         resolved_credential_pool = runtime.get("credential_pool")
+        # The resolver sets sdk_managed_auth=True for providers that handle
+        # their own credentials (Vertex ADC, AWS IAM, etc.) and construct
+        # their own client — skip the key/URL gate for those.
+        _sdk_managed_auth = runtime.get("sdk_managed_auth", False)
         # A callable api_key is a bearer-token provider (Azure Foundry
         # Entra ID — ``azure_identity_adapter.build_token_provider``).
         # The OpenAI SDK accepts ``Callable[[], str]`` for ``api_key`` and
         # invokes it before every request. Skip the string-only validation
         # and placeholder substitution for callables.
         _is_callable_provider = callable(api_key) and not isinstance(api_key, str)
-        if not _is_callable_provider and (not isinstance(api_key, str) or not api_key):
+        if not _sdk_managed_auth and not _is_callable_provider and (not isinstance(api_key, str) or not api_key):
             # Custom / local endpoints (llama.cpp, ollama, vLLM, etc.) often
             # don't require authentication.  When a base_url IS configured but
             # no API key was found, use a placeholder so the OpenAI SDK
@@ -106,7 +110,7 @@ class CLIAgentSetupMixin:
                 print("\n⚠️  Provider resolver returned an empty API key. "
                       "Set OPENROUTER_API_KEY or run: hermes setup")
                 return False
-        if not isinstance(base_url, str) or not base_url:
+        if not _sdk_managed_auth and (not isinstance(base_url, str) or not base_url):
             print("\n⚠️  Provider resolver returned an empty base URL. "
                   "Check your provider config or run: hermes setup")
             return False

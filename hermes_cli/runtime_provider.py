@@ -1263,6 +1263,7 @@ def _resolve_explicit_runtime(
             "project_id": project_id,
             "region": region,
             "source": "gcloud_adc",
+            "sdk_managed_auth": True,
             "requested_provider": requested_provider,
         }
 
@@ -1682,6 +1683,7 @@ def resolve_runtime_provider(
             "project_id": project_id,
             "region": region,
             "source": "gcloud_adc",
+            "sdk_managed_auth": True,
             "requested_provider": requested_provider,
         }
 
