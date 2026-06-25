@@ -847,14 +847,10 @@ def try_recover_primary_transport(
         agent.api_key = rt["api_key"]
 
         if agent.api_mode == "anthropic_messages":
-            from agent.anthropic_adapter import build_anthropic_client
             agent._anthropic_api_key = rt["anthropic_api_key"]
             agent._anthropic_base_url = rt["anthropic_base_url"]
-            agent._anthropic_client = build_anthropic_client(
-                rt["anthropic_api_key"], rt["anthropic_base_url"],
-                timeout=get_provider_request_timeout(agent.provider, agent.model),
-            )
             agent._is_anthropic_oauth = rt["is_anthropic_oauth"]
+            agent._anthropic_client = agent._build_anthropic_client_for_provider()
             agent.client = None
         else:
             agent.client = agent._create_openai_client(
@@ -1019,14 +1015,10 @@ def restore_primary_runtime(agent) -> bool:
 
         # ── Rebuild client for the primary provider ──
         if agent.api_mode == "anthropic_messages":
-            from agent.anthropic_adapter import build_anthropic_client
             agent._anthropic_api_key = rt["anthropic_api_key"]
             agent._anthropic_base_url = rt["anthropic_base_url"]
-            agent._anthropic_client = build_anthropic_client(
-                rt["anthropic_api_key"], rt["anthropic_base_url"],
-                timeout=get_provider_request_timeout(agent.provider, agent.model),
-            )
             agent._is_anthropic_oauth = rt["is_anthropic_oauth"]
+            agent._anthropic_client = agent._build_anthropic_client_for_provider()
             agent.client = None
         else:
             agent.client = agent._create_openai_client(
@@ -1530,37 +1522,48 @@ def switch_model(agent, new_model, new_provider, api_key='', base_url='', api_mo
                 resolve_anthropic_token,
                 _is_oauth_token,
             )
-            # Only fall back to ANTHROPIC_TOKEN when the provider is actually Anthropic.
-            # Other anthropic_messages providers (MiniMax, Alibaba, etc.) must use their own
-            # API key — falling back would send Anthropic credentials to third-party endpoints.
-            _is_native_anthropic = new_provider == "anthropic"
-            effective_key = (api_key or agent.api_key or resolve_anthropic_token() or "") if _is_native_anthropic else (api_key or agent.api_key or "")
 
-            # MiniMax OAuth: swap static string for a per-request callable token
-            # provider so the rebuilt client survives 15-min token expiry. See
-            # the matching block in agent_init.py for the full rationale.
-            if new_provider == "minimax-oauth" and isinstance(effective_key, str) and effective_key:
-                try:
-                    from hermes_cli.auth import build_minimax_oauth_token_provider
-                    effective_key = build_minimax_oauth_token_provider()
-                except Exception as _mm_exc:  # noqa: BLE001
-                    import logging as _logging
-                    _logging.getLogger(__name__).warning(
-                        "MiniMax OAuth: failed to install per-request token provider "
-                        "on switch (%s); using static bearer.",
-                        _mm_exc,
-                    )
+            # SDK-managed providers build their own client — no API key needed.
+            if new_provider == "vertex":
+                agent.api_key = ""
+                agent._anthropic_api_key = ""
+                agent._anthropic_base_url = ""
+                agent._is_anthropic_oauth = False
+                agent._anthropic_client = agent._build_anthropic_client_for_provider()
+                agent.client = None
+                agent._client_kwargs = {}
+            else:
+                # Only fall back to ANTHROPIC_TOKEN when the provider is actually Anthropic.
+                # Other anthropic_messages providers (MiniMax, Alibaba, etc.) must use their own
+                # API key — falling back would send Anthropic credentials to third-party endpoints.
+                _is_native_anthropic = new_provider == "anthropic"
+                effective_key = (api_key or agent.api_key or resolve_anthropic_token() or "") if _is_native_anthropic else (api_key or agent.api_key or "")
 
-            agent.api_key = effective_key
-            agent._anthropic_api_key = effective_key
-            agent._anthropic_base_url = base_url or getattr(agent, "_anthropic_base_url", None)
-            agent._anthropic_client = build_anthropic_client(
-                effective_key, agent._anthropic_base_url,
-                timeout=get_provider_request_timeout(agent.provider, agent.model),
-            )
-            agent._is_anthropic_oauth = _is_oauth_token(effective_key) if (_is_native_anthropic and isinstance(effective_key, str)) else False
-            agent.client = None
-            agent._client_kwargs = {}
+                # MiniMax OAuth: swap static string for a per-request callable token
+                # provider so the rebuilt client survives 15-min token expiry. See
+                # the matching block in agent_init.py for the full rationale.
+                if new_provider == "minimax-oauth" and isinstance(effective_key, str) and effective_key:
+                    try:
+                        from hermes_cli.auth import build_minimax_oauth_token_provider
+                        effective_key = build_minimax_oauth_token_provider()
+                    except Exception as _mm_exc:  # noqa: BLE001
+                        import logging as _logging
+                        _logging.getLogger(__name__).warning(
+                            "MiniMax OAuth: failed to install per-request token provider "
+                            "on switch (%s); using static bearer.",
+                            _mm_exc,
+                        )
+
+                agent.api_key = effective_key
+                agent._anthropic_api_key = effective_key
+                agent._anthropic_base_url = base_url or getattr(agent, "_anthropic_base_url", None)
+                agent._anthropic_client = build_anthropic_client(
+                    effective_key, agent._anthropic_base_url,
+                    timeout=get_provider_request_timeout(agent.provider, agent.model),
+                )
+                agent._is_anthropic_oauth = _is_oauth_token(effective_key) if (_is_native_anthropic and isinstance(effective_key, str)) else False
+                agent.client = None
+                agent._client_kwargs = {}
         else:
             effective_key = api_key or agent.api_key
             effective_base = base_url or agent.base_url
